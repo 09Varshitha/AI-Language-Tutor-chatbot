@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Chat{% endblock %}
+
+{% block content %}
+<div class="chat-container">
+    <header class="chat-header">
+        <h1>AI Language Tutor</h1>
+        <a href="{{ url_for('logout') }}" class="btn btn-logout">Logout</a>
+    </header>
+    
+    <div class="chat-messages" id="chat-messages">
+        <div class="message bot">
+            <div class="message-content">
+                Hello! I'm your AI language tutor. What language would you like to learn today?
+            </div>
+        </div>
+    </div>
+    
+    <form class="chat-input-form" id="chat-form">
+        <input type="text" id="user-input" placeholder="Type your message..." required>
+        <button type="submit" class="btn btn-send">Send</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('chat-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const input = document.getElementById('user-input');
+    const message = input.value.trim();
+    if (!message) return;
+    
+    // Add user message to chat
+    addMessage(message, true);
+    input.value = '';
+    
+    try {
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `message=${encodeURIComponent(message)}`
+        });
+        
+        const data = await response.json();
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        
+        // Add bot response to chat
+        addMessage(data.response, false);
+    } catch (error) {
+        addMessage('Sorry, I encountered an error. Please try again.', false);
+        console.error('Error:', error);
+    }
+});
+
+function addMessage(text, isUser) {
+    const messagesDiv = document.getElementById('chat-messages');
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    contentDiv.textContent = text;
+    
+    messageDiv.appendChild(contentDiv);
+    messagesDiv.appendChild(messageDiv);
+    
+    // Scroll to bottom
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+</script>
+{% endblock %} 

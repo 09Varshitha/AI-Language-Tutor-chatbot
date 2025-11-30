@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+
+{% block title %}Chat{% endblock %}
+
+{% block content %}
+<div class="chat-container">
+    <header class="chat-header">
+        <h1>AI Language Tutor</h1>
+        <div class="language-controls">
+            <select id="language-select" class="language-select">
+                <option value="">Select Language</option>
+                <optgroup label="Indian Languages">
+                    {% for lang in languages['Indian Languages'] %}
+                    <option value="{{ lang }}" {% if current_language == lang %}selected{% endif %}>{{ lang }}</option>
+                    {% endfor %}
+                </optgroup>
+                <optgroup label="International Languages">
+                    {% for lang in languages['International Languages'] %}
+                    <option value="{{ lang }}" {% if current_language == lang %}selected{% endif %}>{{ lang }}</option>
+                    {% endfor %}
+                </optgroup>
+            </select>
+            <select id="level-select" class="level-select">
+                <option value="beginner" {% if current_level == 'beginner' %}selected{% endif %}>Beginner</option>
+                <option value="intermediate" {% if current_level == 'intermediate' %}selected{% endif %}>Intermediate</option>
+                <option value="advanced" {% if current_level == 'advanced' %}selected{% endif %}>Advanced</option>
+            </select>
+        </div>
+        <a href="{{ url_for('logout') }}" class="btn btn-logout">Logout</a>
+    </header>
+    
+    <div class="chat-messages" id="chat-messages">
+        <div class="message bot">
+            <div class="message-content">
+                Hello! I'm your AI language tutor. Please select a language and skill level from the dropdown menus above, or tell me which language you'd like to learn. I can help you with various Indian languages like Hindi, Tamil, Telugu, and international languages like English, Spanish, French, and many more!
+            </div>
+        </div>
+    </div>
+    
+    <form class="chat-input-form" id="chat-form">
+        <input type="text" id="user-input" placeholder="Type your message..." required>
+        <button type="button" id="mic-btn" class="btn btn-mic" title="Speak"><span id="mic-icon">🎤</span></button>
+        <button type="submit" class="btn btn-send">Send</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const languageSelect = document.getElementById('language-select');
+const levelSelect = document.getElementById('level-select');
+const chatMessages = document.getElementById('chat-messages');
+const chatForm = document.getElementById('chat-form');
+const userInput = document.getElementById('user-input');
+let isWaitingForResponse = false;
+
+async function updateLanguageSettings() {
+    const language = languageSelect.value;
+    const level = levelSelect.value;
+    
+    if (!language) {
+        addMessage('Please select a language first', false);
+        return;
+    }
+    
+    try {
+        const response = await fetch('/set_language', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `language=${encodeURIComponent(language)}&level=${encodeURIComponent(level)}`
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to update language settings');
+        }
+        
+        // Show success message
+        addMessage(`Great! I'll help you learn ${language} at ${level} level. What would you like to learn first?`, false);
+        
+    } catch (error) {
+        console.error('Error updating language settings:', error);
+        addMessage('Failed to update language settings. Please try again.', false);
+    }
+}
+
+// Add event listeners
+languageSelect.addEventListener('change', updateLanguageSettings);
+levelSelect.addEventListener('change', updateLanguageSettings);
+
+chatForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    if (isWaitingForResponse) {
+        return; // Prevent multiple submissions while waiting
+    }
+    
+    if (!languageSelect.value) {
+        addMessage('Please select a language before sending messages', false);
+        return;
+    }
+    
+    const message = userInput.value.trim();
+    if (!message) return;
+    
+    // Add user message to chat
+    addMessage(message, true);
+    userInput.value = '';
+    
+    try {
+        isWaitingForResponse = true;
+        userInput.disabled = true;
+        addLoadingMessage();
+        
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `message=${encodeURIComponent(message)}`
+        });
+        
+        const data = await response.json();
+        
+        // Remove loading message
+        removeLoadingMessage();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to get response');
+        }
+        
+        // Add bot response to chat
+        addMessage(data.response, false);
+    } catch (error) {
+        console.error('Error:', error);
+        addMessage(error.message || 'Sorry, I encountered an error. Please try again.', false);
+    } finally {
+        isWaitingForResponse = false;
+        userInput.disabled = false;
+        userInput.focus();
+    }
+});
+
+function addLoadingMessage() {
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'message bot loading';
+    loadingDiv.innerHTML = '<div class="message-content">Thinking...</div>';
+    chatMessages.appendChild(loadingDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function removeLoadingMessage() {
+    const loadingMessage = chatMessages.querySelector('.loading');
+    if (loadingMessage) {
+        loadingMessage.remove();
+    }
+}
+
+function addMessage(text, isUser) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    contentDiv.textContent = text;
+    
+    messageDiv.appendChild(contentDiv);
+    chatMessages.appendChild(messageDiv);
+    
+    // Scroll to bottom
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+const micBtn = document.getElementById('mic-btn');
+const micIcon = document.getElementById('mic-icon');
+let recognition;
+let isListening = false;
+
+// Check for browser support
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SpeechRecognition();
+    recognition.lang = 'en-US'; // Default; can be set dynamically
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = function() {
+        isListening = true;
+        micIcon.textContent = '🔴'; // Change icon to indicate listening
+        micBtn.classList.add('listening');
+    };
+    recognition.onend = function() {
+        isListening = false;
+        micIcon.textContent = '🎤';
+        micBtn.classList.remove('listening');
+    };
+    recognition.onerror = function(event) {
+        isListening = false;
+        micIcon.textContent = '🎤';
+        micBtn.classList.remove('listening');
+        alert('Speech recognition error: ' + event.error);
+    };
+    recognition.onresult = function(event) {
+        const transcript = event.results[0][0].transcript;
+        userInput.value = transcript;
+        userInput.focus();
+    };
+
+    micBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        if (isListening) {
+            recognition.stop();
+        } else {
+            recognition.start();
+        }
+    });
+} else {
+    micBtn.disabled = true;
+    micBtn.title = 'Speech recognition not supported in this browser.';
+}
+
+// Initialize with current values if they exist
+const currentLanguage = '{{ current_language or "" }}';
+const currentLevel = '{{ current_level or "beginner" }}';
+
+if (currentLanguage) {
+    languageSelect.value = currentLanguage;
+}
+if (currentLevel) {
+    levelSelect.value = currentLevel;
+}
+</script>
+
+<style>
+.loading .message-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.loading .message-content::after {
+    content: '';
+    width: 12px;
+    height: 12px;
+    border: 2px solid #1976d2;
+    border-radius: 50%;
+    border-top-color: transparent;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.btn-mic {
+    background: #fff;
+    border: 1px solid #1976d2;
+    color: #1976d2;
+    margin-right: 8px;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 1.2em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, color 0.2s;
+}
+.btn-mic.listening {
+    background: #ffeaea;
+    color: #d32f2f;
+    border-color: #d32f2f;
+}
+</style>
+{% endblock %} 
